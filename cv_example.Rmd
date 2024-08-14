@@ -1,0 +1,210 @@
+---
+title: "CV_example"
+author: "Matthew Carroll"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(agricolae)
+```
+Set up fake data examples
+```{r}
+n_reps = 3
+n_geno = 20
+n_col = 10
+n_row = 6
+
+plot_num = n_reps*n_geno
+plot_num1 = n_col * n_row 
+
+#checking to make sure field design is correct
+plot_num == plot_num1
+
+```
+```{r}
+genotypes = c(1:n_geno)
+reps = c(1:n_reps)
+columns = c(1:n_col)
+rows = c(1:n_row)
+
+row_col = expand.grid(Columns = columns, Rows = rows)
+
+replications = rep(reps,each = n_geno)
+
+field_book = 
+row_col%>%
+  arrange(Rows,Columns)%>%
+  mutate(Reps = replications)
+
+#check to make sure the field desing is what you are expecting
+field_book%>%
+  ggplot(aes(x = Columns, y = Rows, fill = Reps))+
+  geom_tile()+
+  scale_fill_viridis_c()
+```
+
+Generate Random, within replication gentoype --> plot location
+```{r}
+count = 1
+for (i in reps) {
+  geno = sample(genotypes, size = n_geno)
+  df = expand.grid(Reps = i, Genotype = geno)
+  if(count == 1){
+    Rep_geno = df
+  }else{
+    Rep_geno = rbind(Rep_geno, df)
+  }
+  count = count +1
+}
+
+
+Rep_geno
+field_book
+field_book$Genotype = Rep_geno$Genotype
+
+#check that layout still looks correct
+field_book%>%
+  ggplot(aes(x = Columns, y = Rows, fill = Genotype))+
+  geom_tile()
+
+field_book%>%
+  group_by(Genotype)%>%
+  count()
+
+field_book%>%
+  group_by(Genotype,Reps)%>%
+  count()
+```
+Simulating Genotypic effects
+Rep Effects
+Random effects
+
+```{r}
+population_mean = 60
+SD = 10
+genotype_effect = rnorm(n = n_geno, mean = population_mean, sd = SD)
+
+rep_effect = c(-2,0,2)
+
+Geno_df = as.data.frame(cbind(Genotype = genotypes, genotype_effect))
+Rep_df = as.data.frame(cbind(Reps = reps, rep_effect))
+
+#merging genotype and rep effects to field book
+field_book = 
+field_book%>%
+  left_join(Geno_df)%>%
+  left_join(Rep_df)
+
+field_book
+
+```
+Random effects for each plot
+
+```{r}
+rand_mean = 0 
+rand_sd = 5
+rand_effects = rnorm(n = n_col*n_row, mean = rand_mean, sd = rand_sd)
+rand_effects
+field_book$rand_effect = rand_effects
+field_book = 
+field_book%>%
+  mutate(Yield =genotype_effect + rep_effect +rand_effect  )
+
+field_book
+```
+
+SD and CV calcs
+https://en.wikipedia.org/wiki/Coefficient_of_variation
+CV = sd/mean
+when using a linear model SD should be based on the anova output, not on the entire SD but the unexplained error. 
+
+
+```{r}
+sd_phenotypic = sd(field_book$Yield)
+mean_photypic = mean(field_book$Yield)
+sd_phenotypic
+mean_photypic
+
+CV = sd_phenotypic/mean_photypic*100
+CV
+```
+
+```{r}
+field_book
+```
+
+Factor around genotype and reps becasue it is an integer and the linear model will try to run this as a slope and not an intercept
+
+```{r}
+lm_yield = lm(Yield ~ factor(Genotype) + factor(Reps), data = field_book)
+
+lm_yield
+summary(lm_yield)
+anova(lm_yield)
+
+
+CV_lm = sqrt(25.52)/mean_photypic*100
+CV_lm
+```
+Check wiht Agricolae package
+Soybean we use 15% as a threshold to keep or discard a trial 
+This is the difference in keep or removing a location worth of data
+```{r}
+
+LSD.test(lm_yield,console = TRUE, trt = "factor(Genotype)")$statistics
+
+cv.model(lm_yield)
+```
+LSD formula and explanation when their are different levels of replication
+Gomes and Gomez page 201
+```{r}
+anova(lm_yield)
+
+
+t_value = qt( p = .975, df = 38)
+s2 = 25.51556
+reps_1 = 3
+reps_2 = 3
+reps_add = (1/reps_1)+(1/reps_2)
+
+t_value*sqrt(s2*(reps_add))
+
+```
+```{r}
+new_field_book = field_book[-1,]
+new_field_book  
+
+lm_yield = lm(Yield ~ factor(Genotype) + factor(Reps),
+              data = new_field_book )
+
+anova(lm_yield)
+
+LSD.test(lm_yield,console = TRUE, trt = "factor(Genotype)")$statistics
+```
+
+
+```{r}
+t_value = qt( p = .975, df = 37)
+s2 = 26.08329
+reps_1 = 3
+reps_2 = 3
+reps_add = (1/reps_1)+(1/reps_2)
+
+t_value*sqrt(s2*(reps_add))
+
+```
+
+
+How to make an RCBD desing in agrcolae
+
+```{r}
+design.rcbd(trt = genotypes, r = n_reps)
+```
+
+
